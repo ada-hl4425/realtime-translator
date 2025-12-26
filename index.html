@@ -96,6 +96,23 @@
             cursor: pointer;
         }
         
+        .setting-item select {
+            flex: 1;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
+            color: white;
+            padding: 6px 10px;
+            font-size: 14px;
+            cursor: pointer;
+            outline: none;
+        }
+        
+        .setting-item select option {
+            background: #1e3c72;
+            color: white;
+        }
+        
         #rateValue {
             min-width: 45px;
             font-size: 14px;
@@ -277,6 +294,15 @@
     <div class="content">
         <div class="settings">
             <div class="setting-item">
+                <label for="voiceSelect">音色</label>
+                <select id="voiceSelect">
+                    <option value="zh-CN-XiaoxiaoNeural">晓晓 (温柔女声)</option>
+                    <option value="zh-CN-XiaoyiNeural">晓伊 (活泼女声)</option>
+                    <option value="zh-CN-YunxiNeural">云希 (自然男声)</option>
+                    <option value="zh-CN-YunyangNeural">云扬 (新闻男声)</option>
+                </select>
+            </div>
+            <div class="setting-item">
                 <label for="speechRate">语速</label>
                 <input type="range" id="speechRate" min="0.5" max="2" step="0.1" value="1">
                 <span id="rateValue">1.0x</span>
@@ -331,6 +357,7 @@
         let currentUtterance = null;
         let speechRate = 1.0;
         let autoSpeak = true;
+        let selectedVoice = 'zh-CN-XiaoxiaoNeural';
         
         // 音频分析器
         let audioContext = null;
@@ -340,6 +367,7 @@
         let animationId = null;
         
         // 设置控制
+        const voiceSelect = document.getElementById('voiceSelect');
         const speechRateSlider = document.getElementById('speechRate');
         const rateValue = document.getElementById('rateValue');
         const autoSpeakCheckbox = document.getElementById('autoSpeak');
@@ -348,6 +376,11 @@
         const playBtn = document.getElementById('playBtn');
         
         let lastTranslation = ''; // 保存最后一次翻译结果
+        
+        voiceSelect.addEventListener('change', (e) => {
+            selectedVoice = e.target.value;
+            console.log('切换语音:', selectedVoice);
+        });
         
         speechRateSlider.addEventListener('input', (e) => {
             speechRate = parseFloat(e.target.value);
@@ -591,67 +624,110 @@
             }
         }
         
-        // 中文语音播报
-        function speakChinese(text, forceSpeak = false) {
+        // 中文语音播报 - 使用 Edge TTS（通过代理服务）
+        async function speakChinese(text, forceSpeak = false) {
             // 检查是否开启自动播报（手动播放时忽略此检查）
             if (!autoSpeak && !forceSpeak) {
                 console.log('自动播报已关闭');
                 return;
             }
             
-            console.log('准备播报:', text);
+            console.log('准备播报:', text, '语音:', selectedVoice);
             
             // 停止当前正在播放的语音
-            if (speechSynthesis.speaking) {
-                speechSynthesis.cancel();
-                console.log('停止当前播报');
+            if (currentUtterance) {
+                if (currentUtterance.pause) {
+                    currentUtterance.pause();
+                }
+                if (speechSynthesis.speaking) {
+                    speechSynthesis.cancel();
+                }
             }
             
-            // 创建新的语音合成实例
-            currentUtterance = new SpeechSynthesisUtterance(text);
-            currentUtterance.lang = 'zh-CN';
-            currentUtterance.rate = speechRate;  // 使用用户设置的语速
-            currentUtterance.pitch = 1.0;  // 音调（0-2，1是正常音调）
-            currentUtterance.volume = 1.0;  // 音量（0-1）
+            playBtn.textContent = '🔊 生成中...';
+            playBtn.disabled = true;
             
-            // 监听播放事件
-            currentUtterance.onstart = () => {
-                console.log('开始播报');
+            try {
+                const ratePercent = Math.round((speechRate - 1) * 100);
+                const rateStr = ratePercent >= 0 ? `+${ratePercent}%` : `${ratePercent}%`;
+                
+                // 构建请求 URL（使用免费的 TTS 服务）
+                const url = `https://tts.traviswong.cn/api/azure?text=${encodeURIComponent(text)}&voice=${selectedVoice}&rate=${rateStr}&pitch=+0Hz`;
+                
+                console.log('请求 TTS');
+                
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error('TTS 请求失败');
+                }
+                
+                const audioBlob = await response.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                
+                // 创建音频元素播放
+                const audio = new Audio(audioUrl);
+                currentUtterance = audio;
+                
+                audio.onplay = () => {
+                    console.log('开始播报');
+                    playBtn.textContent = '🔊 播放中...';
+                };
+                
+                audio.onended = () => {
+                    console.log('播报结束');
+                    playBtn.textContent = '🔊 播放';
+                    playBtn.disabled = false;
+                    URL.revokeObjectURL(audioUrl);
+                };
+                
+                audio.onerror = (e) => {
+                    console.error('播放错误:', e);
+                    playBtn.textContent = '🔊 播放';
+                    playBtn.disabled = false;
+                    // 尝试回退到系统 TTS
+                    fallbackToSystemTTS(text);
+                };
+                
+                await audio.play();
+                
+            } catch (error) {
+                console.error('Edge TTS 错误:', error);
+                console.log('回退到系统 TTS');
+                playBtn.textContent = '🔊 播放';
+                playBtn.disabled = false;
+                
+                // 如果 Edge TTS 失败，回退到系统 TTS
+                fallbackToSystemTTS(text);
+            }
+        }
+        
+        // 回退方案：使用系统 TTS
+        function fallbackToSystemTTS(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-CN';
+            utterance.rate = speechRate;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            
+            utterance.onstart = () => {
                 playBtn.textContent = '🔊 播放中...';
             };
             
-            currentUtterance.onend = () => {
-                console.log('播报结束');
+            utterance.onend = () => {
                 playBtn.textContent = '🔊 播放';
             };
             
-            currentUtterance.onerror = (event) => {
-                console.error('播报错误:', event);
-                playBtn.textContent = '🔊 播放';
-            };
-            
-            // 获取中文语音（优先使用系统中文语音）
             const voices = speechSynthesis.getVoices();
-            console.log('可用语音:', voices.length);
-            
             const chineseVoice = voices.find(voice => 
                 voice.lang.includes('zh') || voice.lang.includes('CN')
             );
             
             if (chineseVoice) {
-                currentUtterance.voice = chineseVoice;
-                console.log('使用中文语音:', chineseVoice.name);
-            } else {
-                console.log('未找到中文语音，使用默认');
+                utterance.voice = chineseVoice;
             }
             
-            // 播放语音
-            try {
-                speechSynthesis.speak(currentUtterance);
-                console.log('语音已加入队列');
-            } catch (error) {
-                console.error('播放失败:', error);
-            }
+            speechSynthesis.speak(utterance);
         }
         
         // 开始监听
