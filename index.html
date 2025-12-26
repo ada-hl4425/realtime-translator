@@ -303,18 +303,17 @@
     <div class="content">
         <div class="settings">
             <div class="setting-item">
-                <label for="voiceSelect">音色</label>
+                <label for="voiceSelect">音调</label>
                 <select id="voiceSelect">
-                    <option value="zh-CN-XiaoxiaoNeural">晓晓 (温柔女声)</option>
-                    <option value="zh-CN-XiaoyiNeural">晓伊 (活泼女声)</option>
-                    <option value="zh-CN-YunxiNeural">云希 (自然男声)</option>
-                    <option value="zh-CN-YunyangNeural">云扬 (新闻男声)</option>
+                    <option value="zh-CN-XiaoxiaoNeural">标准 (1.0)</option>
+                    <option value="zh-CN-XiaoyiNeural">活泼 (1.2)</option>
+                    <option value="zh-CN-YunxiNeural">低沉 (0.9)</option>
                 </select>
             </div>
             <div class="setting-item">
                 <label for="speechRate">语速</label>
-                <input type="range" id="speechRate" min="0.5" max="2" step="0.1" value="1">
-                <span id="rateValue">1.0x</span>
+                <input type="range" id="speechRate" min="0.5" max="2" step="0.1" value="1.2">
+                <span id="rateValue">1.2x</span>
             </div>
             <div class="setting-item">
                 <label>
@@ -366,7 +365,7 @@
         let isListening = false;
         let speechSynthesis = window.speechSynthesis;
         let currentUtterance = null;
-        let speechRate = 1.0;
+        let speechRate = 1.2;
         let autoSpeak = true;
         let selectedVoice = 'zh-CN-XiaoxiaoNeural';
         
@@ -645,7 +644,7 @@
             }
         }
         
-        // 中文语音播报 - 使用 Edge TTS（通过代理服务）
+        // 中文语音播报 - 使用优化的系统 TTS
         async function speakChinese(text, forceSpeak = false) {
             // 检查是否开启自动播报（手动播放时忽略此检查）
             if (!autoSpeak && !forceSpeak) {
@@ -653,134 +652,84 @@
                 return;
             }
             
-            console.log('准备播报:', text, '语音:', selectedVoice);
+            console.log('准备播报:', text);
             
             // 停止当前正在播放的语音
-            if (currentUtterance) {
-                if (currentUtterance.pause) {
-                    currentUtterance.pause();
-                }
-                if (speechSynthesis.speaking) {
-                    speechSynthesis.cancel();
-                }
+            if (speechSynthesis.speaking) {
+                speechSynthesis.cancel();
             }
             
-            playBtn.textContent = '🔊 生成中...';
+            playBtn.textContent = '🔊 播放中...';
             playBtn.disabled = true;
             
-            try {
-                const ratePercent = Math.round((speechRate - 1) * 100);
-                const rateStr = ratePercent >= 0 ? `+${ratePercent}%` : `${ratePercent}%`;
-                
-                // 构建请求 URL
-                const url = `https://tts.traviswong.cn/api/azure?text=${encodeURIComponent(text)}&voice=${selectedVoice}&rate=${rateStr}&pitch=+0Hz`;
-                
-                console.log('请求 Edge TTS...');
-                
-                const response = await fetch(url, {
-                    method: 'GET',
-                    mode: 'cors'
-                });
-                
-                console.log('Response status:', response.status);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const audioBlob = await response.blob();
-                console.log('Audio blob size:', audioBlob.size, 'bytes');
-                
-                if (audioBlob.size < 100) {
-                    throw new Error('音频文件太小，可能生成失败');
-                }
-                
-                const audioUrl = URL.createObjectURL(audioBlob);
-                
-                // 创建音频元素播放
-                const audio = new Audio(audioUrl);
-                currentUtterance = audio;
-                
-                audio.onloadstart = () => {
-                    console.log('音频开始加载');
-                };
-                
-                audio.oncanplay = () => {
-                    console.log('音频可以播放');
-                };
-                
-                audio.onplay = () => {
-                    console.log('开始播报');
-                    playBtn.textContent = '🔊 播放中...';
-                };
-                
-                audio.onended = () => {
-                    console.log('播报结束');
-                    playBtn.textContent = '🔊 播放';
-                    playBtn.disabled = false;
-                    URL.revokeObjectURL(audioUrl);
-                };
-                
-                audio.onerror = (e) => {
-                    console.error('音频播放错误:', e);
-                    console.error('Error details:', audio.error);
-                    playBtn.textContent = '🔊 播放';
-                    playBtn.disabled = false;
-                    showError('Edge TTS 播放失败，使用系统语音');
-                    fallbackToSystemTTS(text);
-                };
-                
-                // 尝试播放
-                const playPromise = audio.play();
-                
-                if (playPromise !== undefined) {
-                    playPromise.catch(err => {
-                        console.error('Play() 被拒绝:', err);
-                        showError('自动播放被阻止，请点击播放按钮');
-                        playBtn.disabled = false;
-                        playBtn.textContent = '🔊 播放';
-                    });
-                }
-                
-            } catch (error) {
-                console.error('Edge TTS 错误:', error);
-                showError('Edge TTS 失败: ' + error.message);
-                playBtn.textContent = '🔊 播放';
-                playBtn.disabled = false;
-                
-                // 回退到系统 TTS
-                console.log('尝试系统 TTS');
-                fallbackToSystemTTS(text);
-            }
-        }
-        
-        // 回退方案：使用系统 TTS
-        function fallbackToSystemTTS(text) {
+            // 创建语音合成实例
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'zh-CN';
             utterance.rate = speechRate;
-            utterance.pitch = 1.0;
+            
+            // 根据选择的 voice 调整音调
+            if (selectedVoice.includes('Xiaoyi')) {
+                utterance.pitch = 1.2; // 活泼一点
+            } else if (selectedVoice.includes('Yunxi') || selectedVoice.includes('Yunyang')) {
+                utterance.pitch = 0.9; // 低沉一点
+            } else {
+                utterance.pitch = 1.0; // 默认
+            }
+            
             utterance.volume = 1.0;
             
             utterance.onstart = () => {
-                playBtn.textContent = '🔊 播放中...';
+                console.log('开始播报');
             };
             
             utterance.onend = () => {
+                console.log('播报结束');
                 playBtn.textContent = '🔊 播放';
+                playBtn.disabled = false;
             };
             
+            utterance.onerror = (event) => {
+                console.error('播报错误:', event);
+                playBtn.textContent = '🔊 播放';
+                playBtn.disabled = false;
+                showError('播放失败: ' + event.error);
+            };
+            
+            // 获取中文语音
             const voices = speechSynthesis.getVoices();
-            const chineseVoice = voices.find(voice => 
-                voice.lang.includes('zh') || voice.lang.includes('CN')
+            console.log('可用语音数量:', voices.length);
+            
+            // 优先使用高质量中文语音
+            let chineseVoice = voices.find(voice => 
+                voice.lang === 'zh-CN' && voice.name.includes('Premium')
             );
+            
+            if (!chineseVoice) {
+                chineseVoice = voices.find(voice => 
+                    voice.lang === 'zh-CN' || voice.lang.includes('zh')
+                );
+            }
             
             if (chineseVoice) {
                 utterance.voice = chineseVoice;
+                console.log('使用语音:', chineseVoice.name);
+            } else {
+                console.log('未找到中文语音，使用默认');
             }
             
-            speechSynthesis.speak(utterance);
+            // 播放语音
+            try {
+                speechSynthesis.speak(utterance);
+                currentUtterance = utterance;
+            } catch (error) {
+                console.error('播放失败:', error);
+                playBtn.textContent = '🔊 播放';
+                playBtn.disabled = false;
+                showError('播放失败');
+            }
         }
+        
+        // 移除 fallback 函数，不再需要
         
         // 开始监听
         async function startListening() {
