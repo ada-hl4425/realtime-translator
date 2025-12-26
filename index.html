@@ -49,6 +49,59 @@
             overflow-y: auto;
         }
         
+        .settings {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 15px;
+        }
+        
+        .setting-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .setting-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .setting-item label {
+            font-size: 14px;
+            min-width: 60px;
+        }
+        
+        .setting-item input[type="range"] {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.2);
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        .setting-item input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+        }
+        
+        .setting-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        #rateValue {
+            min-width: 45px;
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
         .text-box {
             background: rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
@@ -159,6 +212,20 @@
     </div>
     
     <div class="content">
+        <div class="settings">
+            <div class="setting-item">
+                <label for="speechRate">语速</label>
+                <input type="range" id="speechRate" min="0.5" max="2" step="0.1" value="1">
+                <span id="rateValue">1.0x</span>
+            </div>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="autoSpeak" checked>
+                    自动播报翻译
+                </label>
+            </div>
+        </div>
+        
         <div class="text-box english-box">
             <div class="label">English</div>
             <div class="text" id="englishText">等待识别...</div>
@@ -186,6 +253,24 @@
         
         let recognition = null;
         let isListening = false;
+        let speechSynthesis = window.speechSynthesis;
+        let currentUtterance = null;
+        let speechRate = 1.0;
+        let autoSpeak = true;
+        
+        // 设置控制
+        const speechRateSlider = document.getElementById('speechRate');
+        const rateValue = document.getElementById('rateValue');
+        const autoSpeakCheckbox = document.getElementById('autoSpeak');
+        
+        speechRateSlider.addEventListener('input', (e) => {
+            speechRate = parseFloat(e.target.value);
+            rateValue.textContent = speechRate.toFixed(1) + 'x';
+        });
+        
+        autoSpeakCheckbox.addEventListener('change', (e) => {
+            autoSpeak = e.target.checked;
+        });
         
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -320,7 +405,11 @@
                 const data = await response.json();
                 
                 if (data.responseStatus === 200) {
-                    chineseText.textContent = data.responseData.translatedText;
+                    const translatedText = data.responseData.translatedText;
+                    chineseText.textContent = translatedText;
+                    
+                    // 语音播报翻译结果
+                    speakChinese(translatedText);
                 } else {
                     chineseText.textContent = '翻译失败';
                 }
@@ -328,6 +417,36 @@
                 console.error('翻译错误:', error);
                 chineseText.textContent = '网络错误，请检查连接';
             }
+        }
+        
+        // 中文语音播报
+        function speakChinese(text) {
+            // 检查是否开启自动播报
+            if (!autoSpeak) return;
+            
+            // 停止当前正在播放的语音
+            if (currentUtterance) {
+                speechSynthesis.cancel();
+            }
+            
+            // 创建新的语音合成实例
+            currentUtterance = new SpeechSynthesisUtterance(text);
+            currentUtterance.lang = 'zh-CN';
+            currentUtterance.rate = speechRate;  // 使用用户设置的语速
+            currentUtterance.pitch = 1.0;  // 音调（0-2，1是正常音调）
+            currentUtterance.volume = 1.0;  // 音量（0-1）
+            
+            // 获取中文语音（优先使用系统中文语音）
+            const voices = speechSynthesis.getVoices();
+            const chineseVoice = voices.find(voice => 
+                voice.lang.includes('zh') || voice.lang.includes('CN')
+            );
+            if (chineseVoice) {
+                currentUtterance.voice = chineseVoice;
+            }
+            
+            // 播放语音
+            speechSynthesis.speak(currentUtterance);
         }
         
         // 开始监听
@@ -351,6 +470,10 @@
             isListening = false;
             if (recognition) {
                 recognition.stop();
+            }
+            // 停止语音播报
+            if (speechSynthesis.speaking) {
+                speechSynthesis.cancel();
             }
             status.textContent = '已停止';
             startBtn.disabled = false;
