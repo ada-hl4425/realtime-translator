@@ -199,6 +199,15 @@
             recognition.lang = 'en-US';
             recognition.continuous = true;  // 持续监听
             recognition.interimResults = true;  // 显示临时结果
+            recognition.maxAlternatives = 1;
+            
+            // Safari 特定优化
+            if (recognition.hasOwnProperty('continuous')) {
+                recognition.continuous = true;
+            }
+            if (recognition.hasOwnProperty('interimResults')) {
+                recognition.interimResults = true;
+            }
             
             recognition.onstart = () => {
                 isListening = true;
@@ -208,34 +217,91 @@
             };
             
             recognition.onresult = async (event) => {
-                const result = event.results[event.results.length - 1];
-                const transcript = result[0].transcript;
+                // 获取所有识别结果并拼接
+                let interimTranscript = '';
+                let finalTranscript = '';
                 
-                // 显示英文
-                englishText.textContent = transcript;
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript + ' ';
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
                 
-                // 如果是最终结果，进行翻译
-                if (result.isFinal) {
-                    translateText(transcript);
+                // 显示临时结果（实时显示正在说的话）
+                const displayText = finalTranscript + interimTranscript;
+                if (displayText.trim()) {
+                    englishText.textContent = displayText;
+                }
+                
+                // 只翻译最终结果，避免频繁调用 API
+                if (finalTranscript.trim()) {
+                    translateText(finalTranscript.trim());
                 }
             };
             
             recognition.onerror = (event) => {
                 console.error('识别错误:', event.error);
+                
+                // 不同错误的处理策略
                 if (event.error === 'no-speech') {
-                    status.textContent = '没有检测到语音，继续监听...';
-                } else if (event.error === 'not-allowed') {
-                    status.textContent = '请允许麦克风权限';
+                    // 没检测到语音，这是正常的，继续监听
+                    status.innerHTML = '等待语音输入... <span class="listening-indicator"></span>';
+                } else if (event.error === 'audio-capture') {
+                    status.textContent = '无法访问麦克风，请检查权限';
                     stopListening();
+                } else if (event.error === 'not-allowed') {
+                    status.textContent = '请允许麦克风权限后刷新页面';
+                    stopListening();
+                } else if (event.error === 'aborted') {
+                    // 被中断，重启
+                    if (isListening) {
+                        setTimeout(() => {
+                            try {
+                                recognition.start();
+                            } catch (e) {
+                                console.log('重启识别');
+                            }
+                        }, 100);
+                    }
                 } else {
                     status.textContent = `错误: ${event.error}`;
+                    // 尝试重启
+                    if (isListening) {
+                        setTimeout(() => {
+                            try {
+                                recognition.start();
+                            } catch (e) {
+                                console.log('尝试重启');
+                            }
+                        }, 1000);
+                    }
                 }
             };
             
             recognition.onend = () => {
+                console.log('识别结束');
+                // 如果还在监听状态，立即重启
                 if (isListening) {
-                    // 自动重启以保持持续监听
-                    recognition.start();
+                    setTimeout(() => {
+                        try {
+                            recognition.start();
+                            console.log('自动重启识别');
+                        } catch (e) {
+                            // 忽略 "already started" 错误
+                            if (e.message.includes('already')) {
+                                console.log('识别已在运行');
+                            } else {
+                                console.error('重启失败:', e);
+                                status.textContent = '识别中断，请重新开始';
+                                stopListening();
+                            }
+                        }
+                    }, 100);
+                } else {
+                    status.textContent = '已停止';
                 }
             };
         }
