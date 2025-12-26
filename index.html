@@ -157,6 +157,15 @@
             text-align: right;
         }
         
+        .error-message {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid rgba(244, 67, 54, 0.5);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        
         .text-box {
             background: rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
@@ -323,6 +332,8 @@
             <div class="volume-value" id="volumeValue">0 dB</div>
         </div>
         
+        <div class="error-message" id="errorMessage" style="display: none;"></div>
+        
         <div class="text-box english-box">
             <div class="label">English</div>
             <div class="text" id="englishText">等待识别...</div>
@@ -374,8 +385,18 @@
         const volumeBar = document.getElementById('volumeBar');
         const volumeValue = document.getElementById('volumeValue');
         const playBtn = document.getElementById('playBtn');
+        const errorMessage = document.getElementById('errorMessage');
         
         let lastTranslation = ''; // 保存最后一次翻译结果
+        
+        // 显示错误消息
+        function showError(msg) {
+            errorMessage.textContent = '⚠️ ' + msg;
+            errorMessage.style.display = 'block';
+            setTimeout(() => {
+                errorMessage.style.display = 'none';
+            }, 5000);
+        }
         
         voiceSelect.addEventListener('change', (e) => {
             selectedVoice = e.target.value;
@@ -651,23 +672,42 @@
                 const ratePercent = Math.round((speechRate - 1) * 100);
                 const rateStr = ratePercent >= 0 ? `+${ratePercent}%` : `${ratePercent}%`;
                 
-                // 构建请求 URL（使用免费的 TTS 服务）
+                // 构建请求 URL
                 const url = `https://tts.traviswong.cn/api/azure?text=${encodeURIComponent(text)}&voice=${selectedVoice}&rate=${rateStr}&pitch=+0Hz`;
                 
-                console.log('请求 TTS');
+                console.log('请求 Edge TTS...');
                 
-                const response = await fetch(url);
+                const response = await fetch(url, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                
+                console.log('Response status:', response.status);
                 
                 if (!response.ok) {
-                    throw new Error('TTS 请求失败');
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 
                 const audioBlob = await response.blob();
+                console.log('Audio blob size:', audioBlob.size, 'bytes');
+                
+                if (audioBlob.size < 100) {
+                    throw new Error('音频文件太小，可能生成失败');
+                }
+                
                 const audioUrl = URL.createObjectURL(audioBlob);
                 
                 // 创建音频元素播放
                 const audio = new Audio(audioUrl);
                 currentUtterance = audio;
+                
+                audio.onloadstart = () => {
+                    console.log('音频开始加载');
+                };
+                
+                audio.oncanplay = () => {
+                    console.log('音频可以播放');
+                };
                 
                 audio.onplay = () => {
                     console.log('开始播报');
@@ -682,22 +722,34 @@
                 };
                 
                 audio.onerror = (e) => {
-                    console.error('播放错误:', e);
+                    console.error('音频播放错误:', e);
+                    console.error('Error details:', audio.error);
                     playBtn.textContent = '🔊 播放';
                     playBtn.disabled = false;
-                    // 尝试回退到系统 TTS
+                    showError('Edge TTS 播放失败，使用系统语音');
                     fallbackToSystemTTS(text);
                 };
                 
-                await audio.play();
+                // 尝试播放
+                const playPromise = audio.play();
+                
+                if (playPromise !== undefined) {
+                    playPromise.catch(err => {
+                        console.error('Play() 被拒绝:', err);
+                        showError('自动播放被阻止，请点击播放按钮');
+                        playBtn.disabled = false;
+                        playBtn.textContent = '🔊 播放';
+                    });
+                }
                 
             } catch (error) {
                 console.error('Edge TTS 错误:', error);
-                console.log('回退到系统 TTS');
+                showError('Edge TTS 失败: ' + error.message);
                 playBtn.textContent = '🔊 播放';
                 playBtn.disabled = false;
                 
-                // 如果 Edge TTS 失败，回退到系统 TTS
+                // 回退到系统 TTS
+                console.log('尝试系统 TTS');
                 fallbackToSystemTTS(text);
             }
         }
